@@ -69,14 +69,28 @@ pipeline {
             }
         }
 
+        // ================= FIX: AUTHENTICATE KUBERNETES =================
+        stage('Authenticate Kubernetes') {
+            steps {
+                withCredentials([string(credentialsId: 'K8S_TOKEN', variable: 'KUBE_TOKEN')]) {
+                    script {
+                        sh '''
+                        kubectl config set-credentials jenkins --token=$KUBE_TOKEN
+                        kubectl config set-context --current --user=jenkins
+                        '''
+                    }
+                }
+            }
+        }
+
         // ================= DEPLOY TO KUBERNETES =================
         stage('Deploy to Kubernetes') {
             steps {
                 script {
                     sh '''
-                    kubectl apply -f k8s/backend-deployment.yaml
-                    kubectl apply -f k8s/frontend-deployment.yaml
-                    kubectl apply -f k8s/service.yaml
+                    kubectl apply -f k8s/backend-deployment.yaml --validate=false
+                    kubectl apply -f k8s/frontend-deployment.yaml --validate=false
+                    kubectl apply -f k8s/service.yaml --validate=false
                     '''
                 }
             }
