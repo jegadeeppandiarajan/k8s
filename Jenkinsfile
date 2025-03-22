@@ -18,22 +18,56 @@ pipeline {
             }
         }
 
+        // ✅ Debugging step to check directory structure
+        stage('Verify Directories') {
+            steps {
+                sh '''
+                echo "Current Workspace:"
+                pwd
+                echo "Listing files:"
+                ls -l
+                '''
+            }
+        }
+
         stage('Build Backend Docker Image') {
             steps {
-                sh 'docker build -t $BACKEND_IMAGE -f backend/dockerfile backend'
+                sh '''
+                if [ -d "$WORKSPACE/backend" ]; then
+                    docker build -t $BACKEND_IMAGE -f $WORKSPACE/backend/dockerfile $WORKSPACE/backend
+                else
+                    echo "Error: Backend directory not found!"
+                    exit 1
+                fi
+                '''
             }
         }
 
         stage('Build Frontend Docker Image') {
             steps {
-                sh 'docker build -t $FRONTEND_IMAGE -f frontend/dockerfile frontend'
+                sh '''
+                if [ -d "$WORKSPACE/frontend" ]; then
+                    docker build -t $FRONTEND_IMAGE -f $WORKSPACE/frontend/dockerfile $WORKSPACE/frontend
+                else
+                    echo "Error: Frontend directory not found!"
+                    exit 1
+                fi
+                '''
             }
         }
 
         stage('Login to Docker Registry') {
-            steps {  // ✅ FIX: Added `{}` after `steps`
+            steps {
                 withCredentials([usernamePassword(credentialsId: 'jega1', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    script {
+                        sh '''
+                        if [ -z "$DOCKER_PASS" ]; then
+                            echo "Error: Docker password is empty!"
+                            exit 1
+                        fi
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        '''
+                    }
                 }
             }
         }
@@ -64,18 +98,25 @@ pipeline {
 
         stage('Run Docker Containers') {
             steps {
-                sh 'docker run -d -p 5000:5000 --name $BACKEND_CONTAINER $BACKEND_IMAGE'
-                sh 'docker run -d -p 5001:80 --name $FRONTEND_CONTAINER $FRONTEND_IMAGE'
+                script {
+                    sh '''
+                    docker images | grep "$(echo $BACKEND_IMAGE | cut -d ':' -f 1)" || { echo "Error: Backend image not found!"; exit 1; }
+                    docker images | grep "$(echo $FRONTEND_IMAGE | cut -d ':' -f 1)" || { echo "Error: Frontend image not found!"; exit 1; }
+
+                    docker run -d -p 5000:5000 --name $BACKEND_CONTAINER $BACKEND_IMAGE
+                    docker run -d -p 5001:80 --name $FRONTEND_CONTAINER $FRONTEND_IMAGE
+                    '''
+                }
             }
         }
     }
 
     post {
         success {
-            echo "Build, push, and container execution successful!"
+            echo "✅ Build, push, and container execution successful!"
         }
         failure {
-            echo "Build or container execution failed."
+            echo "❌ Build or container execution failed. Check logs for details."
         }
     }
 }
