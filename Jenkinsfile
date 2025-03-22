@@ -20,20 +20,18 @@ pipeline {
 
         stage('Build Backend Docker Image') {
             steps {
-                // Use the backend directory as the build context
                 sh 'docker build -t $BACKEND_IMAGE -f backend/dockerfile backend'
             }
         }
 
         stage('Build Frontend Docker Image') {
             steps {
-                // Use the frontend directory as the build context
                 sh 'docker build -t $FRONTEND_IMAGE -f frontend/dockerfile frontend'
             }
         }
 
         stage('Login to Docker Registry') {
-            steps
+            steps {  // ✅ FIX: Added `{}` after `steps`
                 withCredentials([usernamePassword(credentialsId: 'jegadeep', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
                 }
@@ -66,9 +64,7 @@ pipeline {
 
         stage('Run Docker Containers') {
             steps {
-                // Run backend container (exposing port 5000)
                 sh 'docker run -d -p 5000:5000 --name $BACKEND_CONTAINER $BACKEND_IMAGE'
-                // Run frontend container (exposing port 5001 mapped to container port 80)
                 sh 'docker run -d -p 5001:80 --name $FRONTEND_CONTAINER $FRONTEND_IMAGE'
             }
         }
