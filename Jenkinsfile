@@ -1,108 +1,85 @@
 pipeline {
     agent any
-
     environment {
-        BACKEND_IMAGE = "jegadeep/backend-app:latest"
-        FRONTEND_IMAGE = "jegadeep/frontend-app:latest"
-        CONTAINER_BACKEND = "backend-container"
-        CONTAINER_FRONTEND = "frontend-container"
-        REGISTRY_CREDENTIALS = "jega1"  // Jenkins credentials ID for Docker login
-        GIT_CREDENTIALS = "jega"  // Jenkins credentials ID for GitHub
+        // Define image names
+        BACKEND_IMAGE = "jegadeep/docker-backend:latest"
+        FRONTEND_IMAGE = "jegadeep/docker-frontend:latest"
+        // Define container names
+        BACKEND_CONTAINER = "docker-running-backend"
+        FRONTEND_CONTAINER = "docker-running-frontend"
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                withCredentials([usernamePassword(credentialsId: GIT_CREDENTIALS, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
-                    git url: "https://$GIT_USER:$GIT_TOKEN@github.com/jegadeeppandiarajan/k8s.git", branch: 'main'
+                withCredentials([usernamePassword(credentialsId: 'github-jabastin', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
+                    git url: "https://$GIT_USER:$GIT_TOKEN@github.com/jegadeeppandiarajan/jenkins.git", branch: 'main'
                 }
             }
         }
 
-        // ================= BACKEND BUILD & DEPLOY =================
-        stage('Build Backend Image') {
+        stage('Build Backend Docker Image') {
+            steps {
+                // Use the backend directory as the build context
+                sh 'docker build -t $BACKEND_IMAGE -f backend/dockerfile backend'
+            }
+        }
+
+        stage('Build Frontend Docker Image') {
+            steps {
+                // Use the frontend directory as the build context
+                sh 'docker build -t $FRONTEND_IMAGE -f frontend/dockerfile frontend'
+            }
+        }
+
+        stage('Login to Docker Registry') {
+            steps
+                withCredentials([usernamePassword(credentialsId: 'jegadeep', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                }
+            }
+        }
+
+        stage('Push Docker Images') {
+            steps {
+                sh 'docker push $BACKEND_IMAGE'
+                sh 'docker push $FRONTEND_IMAGE'
+            }
+        }
+
+        stage('Stop & Remove Existing Containers') {
             steps {
                 script {
                     sh '''
-                    cd backend
-                    docker build -t $BACKEND_IMAGE .
+                    if [ "$(docker ps -aq -f name=$BACKEND_CONTAINER)" ]; then
+                        docker stop $BACKEND_CONTAINER || true
+                        docker rm $BACKEND_CONTAINER || true
+                    fi
+                    if [ "$(docker ps -aq -f name=$FRONTEND_CONTAINER)" ]; then
+                        docker stop $FRONTEND_CONTAINER || true
+                        docker rm $FRONTEND_CONTAINER || true
+                    fi
                     '''
                 }
             }
         }
 
-        stage('Push Backend Image') {
+        stage('Run Docker Containers') {
             steps {
-                withCredentials([usernamePassword(credentialsId: REGISTRY_CREDENTIALS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    script {
-                        sh '''
-                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        docker push $BACKEND_IMAGE
-                        '''
-                    }
-                }
-            }
-        }
-
-        // ================= FRONTEND BUILD & DEPLOY =================
-        stage('Build Frontend Image') {
-            steps {
-                script {
-                    sh '''
-                    cd frontend
-                    docker build -t $FRONTEND_IMAGE .
-                    '''
-                }
-            }
-        }
-
-        stage('Push Frontend Image') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: REGISTRY_CREDENTIALS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    script {
-                        sh '''
-                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        docker push $FRONTEND_IMAGE
-                        '''
-                    }
-                }
-            }
-        }
-
-        // ================= FIX: AUTHENTICATE KUBERNETES =================
-        stage('Authenticate Kubernetes') {
-            steps {
-                withCredentials([string(credentialsId: 'K8S_TOKEN', variable: 'KUBE_TOKEN')]) {
-                    script {
-                        sh '''
-                        kubectl config set-credentials jenkins --token=$KUBE_TOKEN
-                        kubectl config set-context --current --user=jenkins
-                        '''
-                    }
-                }
-            }
-        }
-
-        // ================= DEPLOY TO KUBERNETES =================
-        stage('Deploy to Kubernetes') {
-            steps {
-                script {
-                    sh '''
-                    kubectl apply -f k8s/backend-deployment.yaml --validate=false
-                    kubectl apply -f k8s/frontend-deployment.yaml --validate=false
-                    kubectl apply -f k8s/service.yaml --validate=false
-                    '''
-                }
+                // Run backend container (exposing port 5000)
+                sh 'docker run -d -p 5000:5000 --name $BACKEND_CONTAINER $BACKEND_IMAGE'
+                // Run frontend container (exposing port 5001 mapped to container port 80)
+                sh 'docker run -d -p 5001:80 --name $FRONTEND_CONTAINER $FRONTEND_IMAGE'
             }
         }
     }
 
     post {
         success {
-            echo "Frontend & Backend successfully built, pushed, and deployed to Kubernetes!"
+            echo "Build, push, and container execution successful!"
         }
         failure {
-            echo "Pipeline failed. Check logs for details."
+            echo "Build or container execution failed."
         }
     }
 }
