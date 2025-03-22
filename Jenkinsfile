@@ -1,77 +1,82 @@
 pipeline {
     agent any
+
     environment {
-        DOCKER_IMAGE = "jegadeep/docker-app:latest"  // Ensure this repo exists on Docker Hub
-        CONTAINER_NAME = "docker-running-app-1"
-        REGISTRY_CREDENTIALS = "jega1"  // Ensure this matches Jenkins credentials ID
+        BACKEND_IMAGE = "jegadeep/backend-app:latest"
+        FRONTEND_IMAGE = "jegadeep/frontend-app:latest"
+        CONTAINER_BACKEND = "backend-container"
+        CONTAINER_FRONTEND = "frontend-container"
+        REGISTRY_CREDENTIALS = "jega1"  // Jenkins credentials ID for Docker login
+        GIT_CREDENTIALS = "jega"  // Jenkins credentials ID for GitHub
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'jega', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
-                    git url: "https://$GIT_USER:$GIT_TOKEN@github.com/jegadeeppandiarajan/jenkins.git", branch: 'main'
+                withCredentials([usernamePassword(credentialsId: GIT_CREDENTIALS, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
+                    git url: "https://$GIT_USER:$GIT_TOKEN@github.com/jegadeeppandiarajan/k8s.git", branch: 'main'
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        // ================= BACKEND BUILD & DEPLOY =================
+        stage('Build Backend Image') {
             steps {
                 script {
-                    sh 'docker build -t $DOCKER_IMAGE .'
+                    sh '''
+                    cd backend
+                    docker build -t $BACKEND_IMAGE .
+                    '''
                 }
             }
         }
 
-        stage('Login to Docker Registry') {
+        stage('Push Backend Image') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'jega1', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                withCredentials([usernamePassword(credentialsId: REGISTRY_CREDENTIALS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     script {
                         sh '''
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        if [ $? -ne 0 ]; then
-                            echo "Docker login failed!"
-                            exit 1
-                        fi
+                        docker push $BACKEND_IMAGE
                         '''
                     }
                 }
             }
         }
 
-        stage('Push to Container Registry') {
+        // ================= FRONTEND BUILD & DEPLOY =================
+        stage('Build Frontend Image') {
             steps {
                 script {
                     sh '''
-                    docker push $DOCKER_IMAGE
-                    if [ $? -ne 0 ]; then
-                        echo "Docker push failed!"
-                        exit 1
-                    fi
+                    cd frontend
+                    docker build -t $FRONTEND_IMAGE .
                     '''
                 }
             }
         }
 
-        stage('Stop & Remove Existing Container') {
+        stage('Push Frontend Image') {
             steps {
-                script {
-                    sh '''
-                    if [ "$(docker ps -aq -f name=$CONTAINER_NAME)" ]; then
-                        echo "Stopping and removing existing container..."
-                        docker stop $CONTAINER_NAME || true
-                        docker rm $CONTAINER_NAME || true
-                    fi
-                    '''
+                withCredentials([usernamePassword(credentialsId: REGISTRY_CREDENTIALS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    script {
+                        sh '''
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push $FRONTEND_IMAGE
+                        '''
+                    }
                 }
             }
         }
 
-        stage('Run Docker Container') {
+        // ================= DEPLOY TO KUBERNETES =================
+        stage('Deploy to Kubernetes') {
             steps {
                 script {
                     sh '''
-                    docker run -d -p 5001:5000 --name $CONTAINER_NAME $DOCKER_IMAGE
+                    kubectl apply -f k8s/backend-deployment.yaml
+                    kubectl apply -f k8s/frontend-deployment.yaml
+                    kubectl apply -f k8s/service.yaml
                     '''
                 }
             }
@@ -80,10 +85,10 @@ pipeline {
 
     post {
         success {
-            echo "Build, push, and container execution successful!"
+            echo "Frontend & Backend successfully built, pushed, and deployed to Kubernetes!"
         }
         failure {
-            echo "Build or container execution failed."
+            echo "Pipeline failed. Check logs for details."
         }
     }
 }
