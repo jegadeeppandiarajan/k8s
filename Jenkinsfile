@@ -1,10 +1,9 @@
-
 pipeline {
     agent any
     environment {
-        DOCKER_IMAGE = "jegadeep/docker-app:latest"  // Change this to your registry
+        DOCKER_IMAGE = "jegadeep/docker-app:latest"  // Ensure this repo exists on Docker Hub
         CONTAINER_NAME = "docker-running-app-1"
-        REGISTRY_CREDENTIALS = "jega1"  // Jenkins credentials ID
+        REGISTRY_CREDENTIALS = "jega1"  // Ensure this matches Jenkins credentials ID
     }
 
     stages {
@@ -18,21 +17,39 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t $DOCKER_IMAGE .'
+                script {
+                    sh 'docker build -t $DOCKER_IMAGE .'
+                }
             }
         }
 
         stage('Login to Docker Registry') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'jega1', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    script {
+                        sh '''
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        if [ $? -ne 0 ]; then
+                            echo "Docker login failed!"
+                            exit 1
+                        fi
+                        '''
+                    }
                 }
             }
         }
 
         stage('Push to Container Registry') {
             steps {
-                sh 'docker push $DOCKER_IMAGE'
+                script {
+                    sh '''
+                    docker push $DOCKER_IMAGE
+                    if [ $? -ne 0 ]; then
+                        echo "Docker push failed!"
+                        exit 1
+                    fi
+                    '''
+                }
             }
         }
 
@@ -41,6 +58,7 @@ pipeline {
                 script {
                     sh '''
                     if [ "$(docker ps -aq -f name=$CONTAINER_NAME)" ]; then
+                        echo "Stopping and removing existing container..."
                         docker stop $CONTAINER_NAME || true
                         docker rm $CONTAINER_NAME || true
                     fi
@@ -51,7 +69,11 @@ pipeline {
 
         stage('Run Docker Container') {
             steps {
-                sh 'docker run -d -p 5001:5000 --name $CONTAINER_NAME $DOCKER_IMAGE'
+                script {
+                    sh '''
+                    docker run -d -p 5001:5000 --name $CONTAINER_NAME $DOCKER_IMAGE
+                    '''
+                }
             }
         }
     }
