@@ -3,7 +3,7 @@ pipeline {
     agent any
     environment {
         DOCKER_IMAGE = "jegadeep/docker-app:latest"  // Change this to your registry
-        CONTAINER_NAME = "docker-running-app"
+        CONTAINER_NAME = "docker-running-app-1"
         REGISTRY_CREDENTIALS = "jega1"  // Jenkins credentials ID
     }
 
